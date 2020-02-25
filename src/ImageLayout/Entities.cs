@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 namespace ImageLayout
 {
     public enum DiagramType { FlowChart, SequenceDiagram, StateDiagram }
-    public enum ShapeType { Circle, Rectangle, Rhombus, Ellipse, Parallelogram }
+    public enum ShapeType { Circle, Rectangle, Rhombus, Ellipse, Parallelogram, CurvedRectangle, ElongatedEllipse }
 
     public class Shape
     {
