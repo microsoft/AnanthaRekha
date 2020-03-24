@@ -56,7 +56,16 @@ namespace ImageLayout
                 //numberofShapes = s_random.next(_imageConstraints.MinShapes, _imageConstraints.MaxShapes + 1);
                 
                 generateAllShapesCombinations(numberofShapes);
+                /*foreach (List<Shape> shapes in allShapeCombinations)
+                {
+                    foreach (Shape shape in shapes)
+                    {
+                        Console.Write(shape.ShapeType);
+                    }
+                    Console.WriteLine();
+                }*/
                 int imageLimit = 0; 
+                
                 if(allShapeCombinations.Count != 0)
                 imageLimit = buckets[numberofShapes - _imageConstraints.MinShapes] / allShapeCombinations.Count;
                 foreach (var vertices in allShapeCombinations)
@@ -99,7 +108,7 @@ namespace ImageLayout
                         }
 
                         //Debug
-                        Trace.WriteLine("X");
+                        /*Trace.WriteLine("X");
                         for (uint i = 0; i < totalVertices; i++)
                         {
                             for (uint j = 0; j < totalVertices; j++)
@@ -108,7 +117,7 @@ namespace ImageLayout
                             }
                             Trace.WriteLine("");
                         }
-                        Trace.Flush();
+                        Trace.Flush();*/
                         //End Debug
 
                         // each cell contains a value in {0,1}
@@ -126,7 +135,7 @@ namespace ImageLayout
                         }
 
                         //Debug
-                        Trace.WriteLine("CELL_C");
+                       /* Trace.WriteLine("CELL_C");
                         for (uint i = 0; i < totalVertices; i++)
                         {
                             for (uint j = 0; j < totalVertices; j++)
@@ -135,7 +144,7 @@ namespace ImageLayout
                             }
                             Trace.WriteLine("");
                         }
-                        Trace.Flush();
+                        Trace.Flush();*/
                         //EndDebug
 
                         // no self connections
@@ -156,11 +165,11 @@ namespace ImageLayout
                         }
 
                         //Debug
-                        Trace.WriteLine("ROWS:");
+                        /*Trace.WriteLine("ROWS:");
                         for (uint i = 0; i < totalVertices; i++)
                         {
                             Trace.WriteLine($"{rows_c[i]} ");
-                        }
+                        }*/
                         //EndDebug
 
                         // each column has fixed in-degree range
@@ -178,11 +187,11 @@ namespace ImageLayout
                         }
 
                         //Debug
-                        Trace.WriteLine("COLS:");
+                        /*Trace.WriteLine("COLS:");
                         for (uint i = 0; i < totalVertices; i++)
                         {
                             Trace.WriteLine($"{cols_c[i]} ");
-                        }
+                        }*/
                         //EndDebug
 
                         Solver solver = ctx.MkSolver();
@@ -207,8 +216,27 @@ namespace ImageLayout
 
                         solver.Assert(flowChart_c);
                         solver.Assert(instance_c);
+                        int currentBucket = numberofShapes - _imageConstraints.MinShapes;
                         while (solver.Check() == Status.SATISFIABLE && numberOfDiagrams > imagesGenerated)
                         {
+                            if (buckets[currentBucket] == 0)
+                            {
+                                prevBucket = numberofShapes - _imageConstraints.MinShapes - 1;
+                                while (prevBucket >= 0)
+                                {
+                                    if (buckets[prevBucket] != 0)
+                                    {
+                                        currentBucket = prevBucket;
+                                        break;
+                                    }
+                                    prevBucket--;
+                                }
+                                if (prevBucket < 0)
+                                {
+
+                                    break;
+                                }
+                            }
                             LogicalImage image = new LogicalImage(vertices.ToList());
                             Model model = solver.Model;
                             Expr[,] R = new Expr[totalVertices, totalVertices];
@@ -216,13 +244,13 @@ namespace ImageLayout
                                 for (uint j = 0; j < totalVertices; j++)
                                     R[i, j] = model.Evaluate(X[i][j]);
                             //Trace.WriteLine("Connections solution:");
-                            for (uint i = 0; i < totalVertices; i++)
+                            /*for (uint i = 0; i < totalVertices; i++)
                             {
                                 for (uint j = 0; j < totalVertices; j++)
                                     Trace.Write(" " + R[i, j]);
                                 Trace.WriteLine("");
                             }
-                            Trace.Flush();
+                            Trace.Flush();*/
 
                             BoolExpr currentSolution = ctx.MkFalse();
                             for (uint i = 0; i < totalVertices; i++)
@@ -237,9 +265,11 @@ namespace ImageLayout
                             solver.Assert(currentSolution);
                             if (!isFlowChart(totalVertices, startIndex, R))
                             {
+                                Trace.WriteLine("IS FLOWCHART FAILED");
                                 continue;
                             }
-                            Console.WriteLine($"image count = {imagesGenerated}");
+                            Trace.WriteLine("-------------------IS FLOW CHART SUCCESS");
+                            /*Console.WriteLine($"image count = {imagesGenerated}");*/
                             
                             //make connections
                             List<Connection> validConnections = new List<Connection>();
@@ -265,29 +295,13 @@ namespace ImageLayout
                             ///Code written by Sri Bhargava Yadavalli
                             ///</summary>
                             /// <code>
-                            if (buckets[numberofShapes - _imageConstraints.MinShapes] == 0)
+                            
+                            /*else
                             {
-                                prevBucket = numberofShapes - _imageConstraints.MinShapes - 1;
-                                while (prevBucket >= 0)
-                                {
-                                    if (buckets[prevBucket] != 0)
-                                    {
-                                        buckets[prevBucket]--;
-                                        break;
-                                    }
-                                    prevBucket--;
-                                }
-                                if (prevBucket < 0)
-                                {
-
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                buckets[numberofShapes - _imageConstraints.MinShapes]--;
-                                imageLimit--;
-                            }
+                                
+                            }*/
+                            buckets[currentBucket]--;
+                            imageLimit--;
                             /// </code>
                             ///<summary>
                             ///Code written by Sri Bhargava Yadavalli
@@ -416,16 +430,16 @@ namespace ImageLayout
                 shapes.Add(currentShape);
                /*idToShape.Add(shapeid++, currentShape);*/ // shapeid is zero indexed 
             }
-            foreach (var shape in shapes)
-                Console.WriteLine(shape.ShapeType);
+            /*foreach (var shape in shapes)
+                Console.WriteLine(shape.ShapeType);*/
             return shapes;
         }
 
         public static bool isFlowChart(int n, int startIndex, Expr[,] R)
         {
 
-            Trace.WriteLine("-----------------------------");
-            Trace.WriteLine($"In 'isFlowChart', n:{n}, startIndex:{startIndex}");
+            /*Trace.WriteLine("-----------------------------");
+            Trace.WriteLine($"In 'isFlowChart', n:{n}, startIndex:{startIndex}");*/
 
             using (Context ctx = new Context())
             {
@@ -474,9 +488,9 @@ namespace ImageLayout
                     }
                 }
 
-                Trace.WriteLine(s.ToString());
+               /* Trace.WriteLine(s.ToString());
                 Trace.WriteLine(start_c.ToString());
-                Trace.WriteLine("-----------------------------");
+                Trace.WriteLine("-----------------------------");*/
 
                 var status = s.Query(start_c);
                 if (status == Status.SATISFIABLE)
@@ -485,8 +499,8 @@ namespace ImageLayout
                 }
                 else
                 {
-                    Trace.WriteLine(s.GetAnswer());
-                    Trace.WriteLine("fail");
+                    /*Trace.WriteLine(s.GetAnswer());
+                    Trace.WriteLine("fail");*/
                     return false;
                 }
             }
