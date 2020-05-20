@@ -229,6 +229,7 @@ namespace ImageGenerator
             String directory = "";
             bool shuffle = false;
             bool outline = false;
+            bool incomplete = false;
             bool roundRectangles = false;
             int minArgRequirement = 0;
             for (int index = 0; index < args.Length; index++)
@@ -261,6 +262,10 @@ namespace ImageGenerator
                     case "--round-rectangles":
                     case "-rr":
                         roundRectangles = true;
+                        break;
+                    case "--incomplete-shapes":
+                    case "-is":
+                        incomplete = true;
                         break;
                 }
             }
@@ -404,7 +409,7 @@ namespace ImageGenerator
                  
                     if (i > numDiag) break;
                     Console.WriteLine($"Figure: {i}");
-                    build_image(directory, image, constraints, i, LayoutType.SugiyamaLayout, outline);
+                    build_image(directory, image, constraints, i, LayoutType.SugiyamaLayout, outline, incomplete);
                     i++;
                     WriteShapesCount(directory, shapesCountDict);
                 }
@@ -525,16 +530,17 @@ namespace ImageGenerator
             img.Save(directory + @"\images\" + index + ".jpg");
         }
 
-        public static void build_image(String directory, LogicalImage image, ImageConstraints constraints, int index, LayoutType layoutType, bool outline)
+        public static void build_image(String directory, LogicalImage image, ImageConstraints constraints, int index, LayoutType layoutType, bool outline, bool incomplete)
         {
            
             Graph graph = new Graph("graph");
             GetNodeBoundaryDelegate boundry = new GetNodeBoundaryDelegate(GetNodeBoundary);
             /*double thickness = s_random.Next(20, 60) / 10.0;*/
             double nodeThickness = (float)s_random.Next(20, 70) / 10.0;
-            double edgeThickness = (float)s_random.Next(10, 40) / 10.0;
+            double edgeThickness = (float)s_random.Next(20, 70) / 10.0;
             
             var settingSelection = s_random.Next(0, 3);
+
             switch (layoutType)
             {
                 case LayoutType.SugiyamaLayout:
@@ -582,6 +588,7 @@ namespace ImageGenerator
                 if(edge.Label != null)
                 edge.Label.FontSize = 6;
                 edge.Attr.LineWidth = edgeThickness;
+                
             }
 
             foreach (var shape in image.Shapes)
@@ -617,45 +624,75 @@ namespace ImageGenerator
             //for graph height and width
             Bitmap bitmap = new Bitmap((int)graph.Width, (int)graph.Height, PixelFormat.Format32bppPArgb);//PixelFormat.Format32bppPArgb);
             renderer.Render(bitmap);
-            
-            if(outline)
+            System.Drawing.Graphics graphicsObj = System.Drawing.Graphics.FromImage(bitmap);
+            SolidBrush brush = new SolidBrush(System.Drawing.Color.White);
+            if (outline)
             {
-               
-                System.Drawing.Graphics graphicsObj = System.Drawing.Graphics.FromImage(bitmap);//myform.CreateGraphics();
                 System.Drawing.Pen pen = new System.Drawing.Pen(System.Drawing.Color.Black, (float)edgeThickness);
                 imageOutline.drawRandomOutline(graphicsObj, pen, index);
                 imageOutline.ResetOutline();
             }
 
-            foreach (var node in graph.Nodes)
+            if (incomplete)
             {
-                var lineWidth = node.Attr.LineWidth;
-                System.Drawing.Graphics graphicsObj = System.Drawing.Graphics.FromImage(bitmap);
-                System.Drawing.Pen pen = new System.Drawing.Pen(System.Drawing.Color.Gray, (float)(lineWidth * 1.5));
-                var nodeBoundingBox = node.BoundingBox;
-                var shapeType = node.Attr.Id.Split()[0];
-                RectangleF rectangle;
-                /*if (shapeType.Equals("Ellipse") || shapeType.Equals("Circle") )
+                foreach (var node in graph.Nodes)
                 {
-                   rectangle = new RectangleF((float)nodeBoundingBox.LeftTop.X, (float)nodeBoundingBox.LeftTop.Y * -1, (float)node.Width, (float)node.Height);
-                   graphicsObj.DrawArc(pen, rectangle, (float)(s_random.Next(0, 3600) / 10.0), (float)(s_random.Next(45, 900) / 10.0));
-                }*/
+                    var nodeBoundingBox = node.BoundingBox;
+                    var shapeType = node.Attr.Id.Split()[0];
+                    RectangleF rectangle;
                     
-                
-                    SolidBrush brush = new SolidBrush(System.Drawing.Color.White);
-                    
-                    var ratio = s_random.Next(2, 10);
-                    var height = (float)(node.Height / ratio);
-                    var width = (float)(node.Width / ratio);
-                    var new_right = (float)node.BoundingBox.Right + lineWidth - width;
-                    var new_bottom = (float)((node.BoundingBox.Bottom * -1) + lineWidth - height);
-                    var x = (float)(s_random.NextDouble() * (new_right - node.BoundingBox.Left - lineWidth) + node.BoundingBox.Left - lineWidth);
-                    var y = (float)(s_random.NextDouble() * (new_bottom - (node.BoundingBox.Top * -1) - lineWidth) + (node.BoundingBox.Top * -1) - lineWidth);
+                    double ratio = 0.0;
+                    while (ratio <= 0 || ratio >= 0.9)
+                        ratio = s_random.NextDouble();
+                    var height = (float)(node.Height * ratio);
+                    var width = (float)(node.Width * ratio);
+                    var new_right = (float)node.BoundingBox.Right + nodeThickness - width;
+                    var new_bottom = (float)((node.BoundingBox.Bottom * -1) + nodeThickness - height);
+                    var x = (float)(s_random.NextDouble() * (new_right - node.BoundingBox.Left - nodeThickness) + node.BoundingBox.Left - nodeThickness);
+                    var y = (float)(s_random.NextDouble() * (new_bottom - (node.BoundingBox.Top * -1) - nodeThickness) + (node.BoundingBox.Top * -1) - nodeThickness);
                     //Console.WriteLine("{0} {1}", width, node.BoundingBox.Right - node.BoundingBox.Left);
                     rectangle = new RectangleF(x, y, width, height);
                     graphicsObj.FillRectangle(brush, rectangle);
-                
-          //      graphicsObj.DrawLine(pen, (float)nodeBoundingBox.LeftTop.X, (float)nodeBoundingBox.LeftTop.Y * -1, (float)nodeBoundingBox.LeftBottom.X, (float)nodeBoundingBox.LeftBottom.Y * -1);
+
+                    //      graphicsObj.DrawLine(pen, (float)nodeBoundingBox.LeftTop.X, (float)nodeBoundingBox.LeftTop.Y * -1, (float)nodeBoundingBox.LeftBottom.X, (float)nodeBoundingBox.LeftBottom.Y * -1);
+                }
+            }
+            System.Drawing.Pen whitePen = new System.Drawing.Pen(System.Drawing.Color.Red, (float)edgeThickness);
+            whitePen.EndCap = System.Drawing.Drawing2D.LineCap.Triangle;
+            System.Drawing.Pen blackPen;
+            SolidBrush whiteBrush = new SolidBrush(System.Drawing.Color.White);
+            foreach (var edge in graph.Edges)
+            {
+                blackPen = new System.Drawing.Pen(System.Drawing.Color.Blue, (float)edgeThickness);
+                blackPen.EndCap = System.Drawing.Drawing2D.LineCap.ArrowAnchor;
+                RectangleF arrowHeadMask;
+                var arrowStartX = (float)edge.EdgeCurve.End.X;
+                var arrowStartY = (float)(edge.EdgeCurve.End.Y * -1 - edgeThickness);
+                var arrowEndX = (float)edge.ArrowAtTargetPosition.X;
+                var arrowEndY = (float)(edge.ArrowAtTargetPosition.Y * -1 - nodeThickness / 2);
+                var arrowHeadMaskX = arrowStartX - (float)edgeThickness;
+                var arrowHeadMaskY = arrowStartY;
+                var arrowHeadMaskWidth = (arrowStartX + (float)edgeThickness) - arrowHeadMaskX;
+                var arrowHeadMaskHeight = (float)(arrowEndY - arrowStartY) ;
+                if (arrowStartX != arrowEndX)
+                {
+                    var temp = arrowHeadMaskHeight;
+                    arrowHeadMaskHeight = arrowHeadMaskWidth;
+                    arrowHeadMaskWidth = temp;
+                    Console.WriteLine("Horizontal {0}", index);
+                    continue;
+                }
+                //Console.WriteLine("({0},{1})--({2},{3})==>[{4},{5}]<==>[{6}, {7}]", arrowStartX, arrowStartY, arrowEndX, arrowEndY, arrowHeadMaskWidth, arrowHeadMaskHeight, arrowHeadMaskX, arrowHeadMaskY);
+                arrowHeadMask = new RectangleF(arrowHeadMaskX, arrowHeadMaskY, arrowHeadMaskWidth, arrowHeadMaskHeight);
+                //graphicsObj.DrawEllipse(whitePen, arrowHeadMask);
+                //graphicsObj.FillEllipse(whiteBrush, arrowHeadMask);
+                graphicsObj.FillRectangle(whiteBrush, arrowHeadMask);
+                /*graphicsObj.DrawLine(whitePen, arrowStartX, arrowStartY, arrowStartX + 20, arrowStartY + 20);
+                graphicsObj.DrawLine(blackPen, arrowEndX, arrowEndY, arrowEndX + 20, arrowEndY + 20);*/
+                blackPen.Color = System.Drawing.Color.Black;
+
+                graphicsObj.DrawLine(blackPen, arrowStartX, arrowStartY, arrowEndX, arrowEndY);
+
             }
 
             /*foreach (var edge in graph.Edges)
@@ -695,16 +732,19 @@ namespace ImageGenerator
         {
             double cell = (float)s_random.Next(50, 80);
             double ecc = (((float)s_random.Next(20, 100) / 100.00) * cell);
-            double rectCell = (float)s_random.Next(8, 400);
-            double rectEcc = (((float)s_random.Next(10, 100) / 100.00) * rectCell);
 
+            /*  To increase size of rectangle use these
+             *  
+             *  double rectCell = (float)s_random.Next(8, 400);
+             *  double rectEcc = (((float)s_random.Next(10, 100) / 100.00) * rectCell);
+            */
             switch (n.Id.Split()[0])
             {
                 case "Rhombus":
 
                     double height = ecc / 4.0 >= n.Attr.LineWidth ? ecc / 2.0 : n.Attr.LineWidth * 2;
-                    if (s_random.Next(0, 2) == 0)
-                    {
+                    /*if (s_random.Next(0, 2) == 0)
+                    {*/
                         if (!shapesCountDict.ContainsKey("Rhombus"))
                         {
                             shapesCountDict.Add("Rhombus", 1);
@@ -713,12 +753,12 @@ namespace ImageGenerator
                         {
                             shapesCountDict["Rhombus"]++;
                         }
-                    }
-                    else
+                    /*}*/
+                    /*else
                     {
                         n.Id = n.Id.Replace("Rhombus", "Ellipse");
                         goto case "Ellipse";
-                    }
+                    }*/
                         
                     return CurveFactory.CreateDiamond(cell / 2.0, height, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Circle":
@@ -762,7 +802,7 @@ namespace ImageGenerator
                             shapesCountDict["Rectangle"]++;
                         }
                         
-                        return CurveFactory.CreateRectangle(rectCell, rectEcc, new Microsoft.Msagl.Core.Geometry.Point());
+                        return CurveFactory.CreateRectangle(cell, ecc, new Microsoft.Msagl.Core.Geometry.Point());
                     }
                     
                 case "Parallelogram":
@@ -794,7 +834,7 @@ namespace ImageGenerator
                         shapesCountDict["CurvedRectangle"]++;
                     }
                     
-                    return CurveFactory.CreateRectangleWithRoundedCorners(rectCell * 2, rectEcc, rectEcc / 4, rectEcc / 4, new Microsoft.Msagl.Core.Geometry.Point());
+                    return CurveFactory.CreateRectangleWithRoundedCorners(cell * 2, ecc, ecc / 4, ecc / 4, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Process":
                     {
                         Curve curve = (Curve)CurveFactory.CreateRectangle(cell * 2, ecc, new Microsoft.Msagl.Core.Geometry.Point());
