@@ -2,9 +2,9 @@
 // Licensed under the MIT license.
 
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
-using System.Configuration;
 using System.Web.Script.Serialization;
 using ImageLayout;
 using Bitmap = System.Drawing.Bitmap;
@@ -14,15 +14,142 @@ using Microsoft.Msagl.Core.Geometry.Curves;
 using Microsoft.Msagl.Core.Routing;
 using Microsoft.Msagl.Layout.Layered;
 using Microsoft.Msagl.GraphViewerGdi;
-using Newtonsoft.Json;
 using Microsoft.Msagl.Core.Geometry;
+using Microsoft.Msagl.Layout.Incremental;
+using Microsoft.Msagl.Core.DataStructures;
+using System.Text;
+using System.Threading;
+using System.Drawing;
+//using System.Drawing;
 
 delegate ICurve GetNodeBoundaryDelegate(Microsoft.Msagl.Drawing.Node n);
 namespace ImageGenerator
 {
+    
+    public enum LayoutType { SugiyamaLayout, FastIncrementalLayout, SugiyamaWithSplines  }
     class Program
     {
-        protected static Random s_random = new Random();
+        private static Dictionary<string, int> shapesCountDict = new Dictionary<string, int>();
+
+        protected static Random s_random = new Random(Guid.NewGuid().GetHashCode());
+
+        
+
+        public class ImageOutline
+        {
+            public float xMin;
+            public float xMax;
+            public float yMin;
+            public float yMax;
+            public ImageOutline()
+            {
+                this.xMin = float.MaxValue;
+                this.yMin = float.MaxValue;
+                this.xMax = 0;
+                this.yMax = 0;
+            }
+            
+            public void ResetOutline()
+            {
+                this.yMin = float.MaxValue;
+                this.xMin = float.MaxValue;
+                this.yMax = 0;
+                this.xMax = 0;
+            }
+
+            public void DrawTop(System.Drawing.Graphics graphicsObject, System.Drawing.Pen pen)
+            {
+                graphicsObject.DrawLine(pen, this.xMin, this.yMin, this.xMax, this.yMin);
+            }
+            public void DrawRight(System.Drawing.Graphics graphicsObject, System.Drawing.Pen pen)
+            {
+                graphicsObject.DrawLine(pen, this.xMax, this.yMin, this.xMax, this.yMax);
+                
+            }
+            public void DrawBottom(System.Drawing.Graphics graphicsObject, System.Drawing.Pen pen)
+            {
+                graphicsObject.DrawLine(pen, this.xMin, this.yMax, this.xMax, this.yMax);
+            }
+            public void DrawLeft(System.Drawing.Graphics graphicsObject, System.Drawing.Pen pen)
+            {
+                graphicsObject.DrawLine(pen, this.xMin, this.yMin, this.xMin, this.yMax);
+            }
+            public void drawRandomOutline(System.Drawing.Graphics graphicsObject, System.Drawing.Pen pen, int mod_16_seed)
+            {
+                int outlineSelector = mod_16_seed % 16;
+                switch (outlineSelector)
+                {
+                    case 0:
+                        this.DrawTop(graphicsObject, pen);
+                        break;
+                    case 1:
+                        this.DrawRight(graphicsObject, pen);
+                        break;
+                    case 2:
+                        this.DrawBottom(graphicsObject, pen);
+                        break;
+                    case 3:
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 4:
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawRight(graphicsObject, pen);
+                        break;
+                    case 5:
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 6:
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawBottom(graphicsObject, pen);
+                        break;
+                    case 7:
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawBottom(graphicsObject, pen);
+                        break;
+                    case 8:
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 9:
+                        this.DrawBottom(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 10:
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawBottom(graphicsObject, pen);
+                        break;
+                    case 11:
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 12:
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawBottom(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        break;
+                    case 13:
+                        this.DrawBottom(graphicsObject, pen);
+                        this.DrawLeft(graphicsObject, pen);
+                        this.DrawTop(graphicsObject, pen);
+                        break;
+                    case 14:
+                        this.DrawLeft(graphicsObject, pen);
+                        this.DrawTop(graphicsObject, pen);
+                        this.DrawRight(graphicsObject, pen);
+                        this.DrawBottom(graphicsObject, pen);
+                        break;
+                    case 15:
+                    default:
+                        break;
+
+                }
+            }
+        }
+        private static ImageOutline imageOutline = new ImageOutline();
+
         public class json_shape
         {
             public json_shape() { }
@@ -61,22 +188,109 @@ namespace ImageGenerator
                 From = from;
                 To = to;
             }
+            public json_connection(json_shape from, json_shape to, Edge edge)
+            {
+                From = from;
+                To = to;
+                BoundingBox = new bounding_box(edge.BoundingBox.Left, edge.BoundingBox.Right, edge.BoundingBox.Top, edge.BoundingBox.Bottom);
+                sourcePointX = (float)edge.EdgeCurve.Start.X;
+                sourcePointY = (float)edge.EdgeCurve.Start.Y * -1;
+                targetPointX = (float)edge.EdgeCurve.End.X;
+                targetPointY = (float)edge.EdgeCurve.End.Y * -1;
+                ArrowSourcePointX = (float)edge.ArrowAtSourcePosition.X;
+                ArrowSourcePointY = (float)edge.ArrowAtSourcePosition.Y * -1;
+                ArrowTargetPointX = (float)edge.ArrowAtTargetPosition.X;
+                ArrowTargetPointY = (float)edge.ArrowAtTargetPosition.Y * -1;
+            }
+
+            public bounding_box BoundingBox { get; set; }
+
             public json_shape From { get; set; }
             public json_shape To { get; set; }
+
+            public float sourcePointX { get; set; }
+            public float sourcePointY { get; set; }
+            public float targetPointX { get; set; }
+            public float targetPointY { get; set; }
+
+            public float ArrowSourcePointX { get; set; }
+            public float ArrowSourcePointY { get; set; }
+
+            public float ArrowTargetPointX { get; set; }
+            public float ArrowTargetPointY { get; set; }
         }
+        
         static void Main(string[] args)
         {
-            if ( args.Count() < 3 )
+            
+            
+            String diagram = "";
+            int numDiag = 0;
+            String directory = "";
+            bool shuffle = false;
+            bool outline = false;
+            bool incomplete = false;
+            bool roundRectangles = false;
+            int minArgRequirement = 0;
+            for (int index = 0; index < args.Length; index++)
             {
-                Console.WriteLine("Arguments: <diagram_type> <number of images> <generated images path> ");
+                switch (args[index].ToLower())
+                {
+                    case "--type":
+                    case "-t":
+                        diagram = args[++index].ToLower();
+                        minArgRequirement++;
+                        break;
+                    case "--num":
+                    case "-n":
+                        numDiag = Int32.Parse(args[++index]);
+                        minArgRequirement++;
+                        break;
+                    case "--directory":
+                    case "-d":
+                        directory = args[++index];
+                        minArgRequirement++;
+                        break;
+                    case "--shuffle":
+                    case "-s":
+                        shuffle = true;
+                        break;
+                    case "--outline":
+                    case "-o":
+                        outline = true;
+                        break;
+                    case "--round-rectangles":
+                    case "-rr":
+                        roundRectangles = true;
+                        break;
+                    case "--incomplete-shapes":
+                    case "-is":
+                        incomplete = true;
+                        break;
+                }
+            }
+            if (minArgRequirement < 3)
+            {
+                Console.WriteLine("Required Arguments: [-t | --rype] <diagram_type> [-n | --num] <number of images> [-d | --directory] <generated images path> ");
                 Environment.Exit(1);
             }
 
 
-            String diagram = args[0].ToLower();
-            int numDiag = Int32.Parse(args[1]);
-            String directory = args[2];
+            try
+            {
+                // Determine whether the directory exists.
+                if (!Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
 
+
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Cannot create directory: {0}", e.ToString());
+            }
+            finally { }
 
             //specify diagram type here
             DiagramType diagramType;
@@ -102,7 +316,9 @@ namespace ImageGenerator
             {
                 case DiagramType.FlowChart:
                     constraints.Width = 299; constraints.Height = 299;
-                    constraints.AllowedShapes = new List<ShapeType>() { ShapeType.Circle, ShapeType.Ellipse, ShapeType.Rectangle, ShapeType.Rhombus, ShapeType.Parallelogram };
+                    var allowedShapes = new List<ShapeType>() { ShapeType.Rectangle, ShapeType.Parallelogram, ShapeType.Rhombus, ShapeType.Circle, ShapeType.Ellipse };
+                    allowedShapes = roundRectangles == true ? new List<ShapeType>() { ShapeType.CurvedRectangle, ShapeType.Circle, ShapeType.Ellipse, ShapeType.Rhombus, ShapeType.Parallelogram } : allowedShapes;
+                    constraints.AllowedShapes = allowedShapes;
                     constraints.MandatoryShapes = new List<ShapeType>() { ShapeType.Ellipse };
                     constraints.SingleOccurrenceShapes = new List<ShapeType>() { ShapeType.Ellipse };
                     constraints.MaxShapes = 8; constraints.MinShapes = 3;
@@ -142,6 +358,7 @@ namespace ImageGenerator
                     conditionConstraints.MinOutDegree = 2;
 
                     constraints.ShapeConstraints.Add(ShapeType.Rectangle, processConstraints);
+                    constraints.ShapeConstraints.Add(ShapeType.CurvedRectangle, processConstraints);
                     constraints.ShapeConstraints.Add(ShapeType.Parallelogram, processConstraints);
                     constraints.ShapeConstraints.Add(ShapeType.Rhombus, conditionConstraints);
                     break;
@@ -182,21 +399,25 @@ namespace ImageGenerator
 
             LogicalImageGenerator generator = new LogicalImageGenerator(constraints);
             int i = 1;
-
+            
+            
             if (diagramType == DiagramType.FlowChart || diagramType == DiagramType.StateDiagram)
             {
-                foreach (var image in generator.GenerateImage(100))
+                
+                foreach (var image in generator.GenerateImage(numDiag, shuffle))
                 {
+                 
                     if (i > numDiag) break;
                     Console.WriteLine($"Figure: {i}");
-                    //printImage(image, constraints);
-                    build_image(directory, image, constraints, i);
+                    build_image(directory, image, constraints, i, LayoutType.SugiyamaLayout, outline, incomplete);
                     i++;
+                    WriteShapesCount(directory, shapesCountDict);
                 }
             }
             else if (diagramType == DiagramType.SequenceDiagram)
             {
-                foreach (var image in generator.GenerateImage(100))
+
+                foreach (var image in generator.GenerateImage(numDiag, shuffle))
                 {
                     if (i > numDiag) break;
                     Console.WriteLine($"Figure: {i}");
@@ -206,24 +427,46 @@ namespace ImageGenerator
                 }
             }
 
+            
         }
 
-        static void create_json(String directory, Graph graph, int index)
+        static void WriteShapesCount(String directory, Dictionary<string, int> shapesCountDict)
+        {
+
+            String imagesCountString = "";
+            String imagesCountPath = System.IO.Path.Combine(directory, "imagescount" + ".txt");
+            
+            foreach (var shapeCountEntry in shapesCountDict)
+            {
+                //Console.WriteLine(shapeCountEntry.Key + ":" + shapeCountEntry.Value);
+                imagesCountString += $"{shapeCountEntry.Key}:  {shapeCountEntry.Value}\n";
+            }
+            File.WriteAllText(imagesCountPath, imagesCountString);
+        }
+        static void create_json(String directory, Graph graph, int index, bool isSquareImage)
         {
             List<json_shape> json_shapes = new List<json_shape>();
             List<json_connection> json_connections = new List<json_connection>();
             foreach (Microsoft.Msagl.Drawing.Node node in graph.Nodes)
             {
-                var bb = new bounding_box(node.BoundingBox.Left, node.BoundingBox.Right, node.BoundingBox.Top, node.BoundingBox.Bottom);
+                var nodeLineWidth = node.Attr.LineWidth/2;
+                var bb = new bounding_box(node.BoundingBox.Left - nodeLineWidth, node.BoundingBox.Right + nodeLineWidth, node.BoundingBox.Top + nodeLineWidth, node.BoundingBox.Bottom - nodeLineWidth);
+                //Console.WriteLine("{0}--{1}--{2}--{3}", node.BoundingBox.Left - nodeLineWidth, node.BoundingBox.Right + nodeLineWidth, node.BoundingBox.Top + nodeLineWidth, node.BoundingBox.Bottom - nodeLineWidth);
+                imageOutline.xMin = imageOutline.xMin > (bb.Left) ? (bb.Left) : imageOutline.xMin ;
+                imageOutline.xMax = imageOutline.xMax < (bb.Right) ? (bb.Right) : imageOutline.xMax;
+                imageOutline.yMin = imageOutline.yMin > (bb.Top) ? (bb.Top) : imageOutline.yMin;
+                imageOutline.yMax = imageOutline.yMax < (bb.Bottom) ? (bb.Bottom) : imageOutline.yMax;
                 json_shapes.Add(new json_shape(bb, node.Attr.Id.Split()[0]));
             }
             foreach (Microsoft.Msagl.Drawing.Edge edge in graph.Edges)
             {
-                var bb_src = new bounding_box(edge.SourceNode.BoundingBox.Left, edge.SourceNode.BoundingBox.Right, edge.SourceNode.BoundingBox.Top, edge.SourceNode.BoundingBox.Bottom);
-                var bb_dst = new bounding_box(edge.TargetNode.BoundingBox.Left, edge.TargetNode.BoundingBox.Right, edge.TargetNode.BoundingBox.Top, edge.TargetNode.BoundingBox.Bottom);
+                var edgeBoundingBox = new bounding_box(edge.BoundingBox.Left, edge.BoundingBox.Right, edge.BoundingBox.Top, edge.BoundingBox.Bottom);
+                var bb_src = new bounding_box(edge.SourceNode.BoundingBox.Left - edge.SourceNode.Attr.LineWidth/2, edge.SourceNode.BoundingBox.Right + edge.SourceNode.Attr.LineWidth/2, edge.SourceNode.BoundingBox.Top + edge.SourceNode.Attr.LineWidth/2, edge.SourceNode.BoundingBox.Bottom - edge.SourceNode.Attr.LineWidth/2);
+                var bb_dst = new bounding_box(edge.TargetNode.BoundingBox.Left - edge.TargetNode.Attr.LineWidth/2, edge.TargetNode.BoundingBox.Right + edge.TargetNode.Attr.LineWidth/2, edge.TargetNode.BoundingBox.Top + edge.TargetNode.Attr.LineWidth/2, edge.TargetNode.BoundingBox.Bottom - edge.TargetNode.Attr.LineWidth/2);
                 json_connections.Add(new json_connection(
                         new json_shape(bb_src, edge.SourceNode.Id.Split()[0]),
-                        new json_shape(bb_dst, edge.TargetNode.Id.Split()[0])
+                        new json_shape(bb_dst, edge.TargetNode.Id.Split()[0]),
+                        edge
                     ));
             }
             JavaScriptSerializer jss = new JavaScriptSerializer();
@@ -231,11 +474,21 @@ namespace ImageGenerator
             string Json_connection = new JavaScriptSerializer().Serialize(json_connections);
             string tmp1 = $"{{ \"Shapes\" : {Json_Shape} }}";
             string tmp2 = $"{{ \"Connections\" : {Json_connection} }}";
+            int graphSize = 0;
             string tmp4 = $"{{ \"Height\" : {(int)graph.Height} }}";
             string tmp5 = $"{{ \"Width\" : {(int)graph.Width} }}";
+            string jsonPath = System.IO.Path.Combine(directory, index + ".txt");
+
+            if (isSquareImage)
+            {
+                graphSize = (int)graph.Width > (int)graph.Height ? (int)graph.Width : (int)graph.Height;
+                tmp4 = $"{{ \"Height\" : {graphSize} }}";
+                tmp5 = $"{{ \"Width\" : {graphSize} }}";
+                jsonPath = System.IO.Path.Combine(directory, "square"+index + ".txt");
+            }
+           
             string tmp3 = "[" + tmp1 + "," + tmp2 + "," + tmp4 + "," + tmp5 + "]";
             string json = $"{{ \"JSON\" : {tmp3} }}";
-            string jsonPath = System.IO.Path.Combine(directory, index + ".txt");
             System.IO.File.WriteAllText(jsonPath, json);
         }
 
@@ -277,68 +530,310 @@ namespace ImageGenerator
             img.Save(directory + @"\images\" + index + ".jpg");
         }
 
-        public static void build_image(String directory, LogicalImage image, ImageConstraints constraints, int index)
+        public static void build_image(String directory, LogicalImage image, ImageConstraints constraints, int index, LayoutType layoutType, bool outline, bool incomplete)
         {
+           
             Graph graph = new Graph("graph");
             GetNodeBoundaryDelegate boundry = new GetNodeBoundaryDelegate(GetNodeBoundary);
-            double thickness = s_random.Next(20, 60) / 10.0;
+            /*double thickness = s_random.Next(20, 60) / 10.0;*/
+            double nodeThickness = (float)s_random.Next(20, 70) / 10.0;
+            double edgeThickness = (float)s_random.Next(20, 70) / 10.0;
+            
+            var settingSelection = s_random.Next(0, 3);
 
-            var settings = new SugiyamaLayoutSettings
+            switch (layoutType)
             {
-                EdgeRoutingSettings = { CornerRadius = 0.0, EdgeRoutingMode = EdgeRoutingMode.Rectilinear, Padding = 1, BendPenalty = 99 },
-                AspectRatio = 1
-            };
-            graph.LayoutAlgorithmSettings = settings;
+                case LayoutType.SugiyamaLayout:
+                    graph.LayoutAlgorithmSettings = new SugiyamaLayoutSettings
+                    {
+                        EdgeRoutingSettings = { CornerRadius = 0.0, EdgeRoutingMode = EdgeRoutingMode.Rectilinear, Padding = 1, BendPenalty = 99 },
+                        AspectRatio = 1
+                    };
+                    break;
+                case LayoutType.FastIncrementalLayout:
+                    graph.LayoutAlgorithmSettings = new FastIncrementalLayoutSettings
+                    {
+                        RouteEdges = true,
+                        AvoidOverlaps = true,
+                        ApplyForces = true,
+                        //RepulsiveForceConstant = 0.5,
+                        AttractiveForceConstant = 0,
+                        RespectEdgePorts = true
+                    };
+                    break;
+                case LayoutType.SugiyamaWithSplines:
+                    graph.LayoutAlgorithmSettings = new SugiyamaLayoutSettings
+                    {
+                        EdgeRoutingSettings = { CornerRadius = 0.0, EdgeRoutingMode = EdgeRoutingMode.SugiyamaSplines, Padding = 1, BendPenalty = 99 },
+                        AspectRatio = 1
+                    };
+                    break;
+                default:
+                    graph.LayoutAlgorithmSettings = new SugiyamaLayoutSettings
+                    {
+                        EdgeRoutingSettings = { CornerRadius = 0.0, EdgeRoutingMode = EdgeRoutingMode.Rectilinear, Padding = 1, BendPenalty = 99 },
+                        AspectRatio = 1
+                    };
+                    break;
+            }
+
+
             foreach (var connection in image.Connections)
             {
+                
                 ImageLayout.Shape src = connection.Source;
                 ImageLayout.Shape dst = connection.Destination;
-                String label = "";
+                String label = "";//s_random.Next(0,10) > 1 ? RandomString(s_random.Next(4, 9)) :
                 var edge = graph.AddEdge(src.ToString(), label, dst.ToString());
-                edge.Attr.LineWidth = thickness;
+                if(edge.Label != null)
+                edge.Label.FontSize = 6;
+                edge.Attr.LineWidth = edgeThickness;
+                
             }
 
             foreach (var shape in image.Shapes)
             {
+                
                 Microsoft.Msagl.Drawing.Node node = graph.FindNode(shape.ToString());
                 node.Attr.Shape = Microsoft.Msagl.Drawing.Shape.DrawFromGeometry;
                 node.NodeBoundaryDelegate = new DelegateToSetNodeBoundary(boundry);
-                node.LabelText = "";
-                node.Attr.LineWidth = thickness;
+                node.Label.Text = "";//s_random.Next(0, 10) > 1 ? RandomString(7) : 
+                node.Attr.LineWidth = nodeThickness;
+                if (node.Label != null)
+                    node.Label.FontSize = 6;
                 //node.Attr.FillColor = new Microsoft.Msagl.Drawing.Color((byte)s_random.Next(255), (byte)s_random.Next(255), (byte)s_random.Next(255));
             }
-
+            
             var renderer = new GraphRenderer(graph);
+            
             renderer.CalculateLayout();
-            Point topleft = graph.GeometryGraph.BoundingBox.LeftTop;
+            Microsoft.Msagl.Core.Geometry.Point topleft = graph.GeometryGraph.BoundingBox.LeftTop;
+            Microsoft.Msagl.Core.Geometry.Point topRight = graph.GeometryGraph.BoundingBox.RightTop;
+           
+            
             graph.GeometryGraph.Transform(new PlaneTransformation(1, 0, 0 - topleft.X, 0, 1, 0 - topleft.Y));//fix bounding box
+            try
+            {
+                create_json(directory, graph, index, false);
+            }
+            catch (System.NotSupportedException e)
+            {
 
+            }
+
+            //for graph height and width
             Bitmap bitmap = new Bitmap((int)graph.Width, (int)graph.Height, PixelFormat.Format32bppPArgb);//PixelFormat.Format32bppPArgb);
             renderer.Render(bitmap);
+            System.Drawing.Graphics graphicsObj = System.Drawing.Graphics.FromImage(bitmap);
+            SolidBrush brush = new SolidBrush(System.Drawing.Color.White);
+            if (outline)
+            {
+                System.Drawing.Pen pen = new System.Drawing.Pen(System.Drawing.Color.Black, (float)edgeThickness);
+                imageOutline.drawRandomOutline(graphicsObj, pen, index);
+                imageOutline.ResetOutline();
+            }
+
+            if (incomplete)
+            {
+                foreach (var node in graph.Nodes)
+                {
+                    var nodeBoundingBox = node.BoundingBox;
+                    var shapeType = node.Attr.Id.Split()[0];
+                    RectangleF rectangle;
+                    
+                    double ratio = 0.0;
+                    while (ratio <= 0 || ratio >= 0.9)
+                        ratio = s_random.NextDouble();
+                    var height = (float)(node.Height * ratio);
+                    var width = (float)(node.Width * ratio);
+                    var new_right = (float)node.BoundingBox.Right + nodeThickness - width;
+                    var new_bottom = (float)((node.BoundingBox.Bottom * -1) + nodeThickness - height);
+                    var x = (float)(s_random.NextDouble() * (new_right - node.BoundingBox.Left - nodeThickness) + node.BoundingBox.Left - nodeThickness);
+                    var y = (float)(s_random.NextDouble() * (new_bottom - (node.BoundingBox.Top * -1) - nodeThickness) + (node.BoundingBox.Top * -1) - nodeThickness);
+                    //Console.WriteLine("{0} {1}", width, node.BoundingBox.Right - node.BoundingBox.Left);
+                    rectangle = new RectangleF(x, y, width, height);
+                    graphicsObj.FillRectangle(brush, rectangle);
+
+                    //      graphicsObj.DrawLine(pen, (float)nodeBoundingBox.LeftTop.X, (float)nodeBoundingBox.LeftTop.Y * -1, (float)nodeBoundingBox.LeftBottom.X, (float)nodeBoundingBox.LeftBottom.Y * -1);
+                }
+            }
+            System.Drawing.Pen whitePen = new System.Drawing.Pen(System.Drawing.Color.Red, (float)edgeThickness);
+            whitePen.EndCap = System.Drawing.Drawing2D.LineCap.Triangle;
+            System.Drawing.Pen blackPen;
+            SolidBrush whiteBrush = new SolidBrush(System.Drawing.Color.White);
+            foreach (var edge in graph.Edges)
+            {
+                blackPen = new System.Drawing.Pen(System.Drawing.Color.Blue, (float)edgeThickness);
+                blackPen.EndCap = System.Drawing.Drawing2D.LineCap.ArrowAnchor;
+                RectangleF arrowHeadMask;
+                var arrowStartX = (float)edge.EdgeCurve.End.X;
+                var arrowStartY = (float)(edge.EdgeCurve.End.Y * -1 - edgeThickness);
+                var arrowEndX = (float)edge.ArrowAtTargetPosition.X;
+                var arrowEndY = (float)(edge.ArrowAtTargetPosition.Y * -1 - nodeThickness / 2);
+                var arrowHeadMaskX = arrowStartX - (float)edgeThickness;
+                var arrowHeadMaskY = arrowStartY;
+                var arrowHeadMaskWidth = (arrowStartX + (float)edgeThickness) - arrowHeadMaskX;
+                var arrowHeadMaskHeight = (float)(arrowEndY - arrowStartY) ;
+                if (arrowStartX != arrowEndX)
+                {
+                    var temp = arrowHeadMaskHeight;
+                    arrowHeadMaskHeight = arrowHeadMaskWidth;
+                    arrowHeadMaskWidth = temp;
+                    Console.WriteLine("Horizontal {0}", index);
+                    continue;
+                }
+                //Console.WriteLine("({0},{1})--({2},{3})==>[{4},{5}]<==>[{6}, {7}]", arrowStartX, arrowStartY, arrowEndX, arrowEndY, arrowHeadMaskWidth, arrowHeadMaskHeight, arrowHeadMaskX, arrowHeadMaskY);
+                arrowHeadMask = new RectangleF(arrowHeadMaskX, arrowHeadMaskY, arrowHeadMaskWidth, arrowHeadMaskHeight);
+                //graphicsObj.DrawEllipse(whitePen, arrowHeadMask);
+                //graphicsObj.FillEllipse(whiteBrush, arrowHeadMask);
+                graphicsObj.FillRectangle(whiteBrush, arrowHeadMask);
+                /*graphicsObj.DrawLine(whitePen, arrowStartX, arrowStartY, arrowStartX + 20, arrowStartY + 20);
+                graphicsObj.DrawLine(blackPen, arrowEndX, arrowEndY, arrowEndX + 20, arrowEndY + 20);*/
+                blackPen.Color = System.Drawing.Color.Black;
+
+                graphicsObj.DrawLine(blackPen, arrowStartX, arrowStartY, arrowEndX, arrowEndY);
+
+            }
+
+            /*foreach (var edge in graph.Edges)
+            {
+                System.Drawing.Graphics graphicsObj = System.Drawing.Graphics.FromImage(bitmap);
+                System.Drawing.Pen pen = new System.Drawing.Pen(System.Drawing.Color.Red, (float)edgeThickness);
+                var edgeBoundingBox = edge.BoundingBox;
+                var edgeCurve = edge.EdgeCurve;
+
+                // graphicsObject.DrawLine(pen, edgeBoundingBox.xMin, this.yMin, this.xMax, this.yMin);
+                // Console.WriteLine("EDGE-->({0},{1})---({2},{3})---({4},{5})---({6},{7})", edgeBoundingBox.LeftTop.X, edgeBoundingBox.LeftTop.Y, edgeBoundingBox.RightTop.X, edgeBoundingBox.RightTop.Y, edgeBoundingBox.RightBottom.X, edgeBoundingBox.RightBottom.Y, edgeBoundingBox.LeftBottom.X, edgeBoundingBox.LeftBottom.Y);
+                 graphicsObj.DrawLine(pen, (float)edgeBoundingBox.LeftTop.X, (float)edgeBoundingBox.LeftTop.Y * -1, (float)edgeBoundingBox.LeftBottom.X, (float)edgeBoundingBox.LeftBottom.Y * -1);
+                 graphicsObj.DrawLine(pen, (float)edgeBoundingBox.LeftTop.X, (float)edgeBoundingBox.LeftTop.Y * -1, (float)edgeBoundingBox.RightTop.X, (float)edgeBoundingBox.RightTop.Y * -1);
+                 graphicsObj.DrawLine(pen, (float)edgeBoundingBox.RightBottom.X, (float)edgeBoundingBox.RightBottom.Y * -1, (float)edgeBoundingBox.LeftBottom.X, (float)edgeBoundingBox.LeftBottom.Y * -1);
+                 graphicsObj.DrawLine(pen, (float)edgeBoundingBox.RightBottom.X, (float)edgeBoundingBox.RightBottom.Y * -1, (float)edgeBoundingBox.RightTop.X, (float)edgeBoundingBox.RightTop.Y * -1);
+
+                pen.Color = System.Drawing.Color.DarkSeaGreen;
+                //Console.WriteLine("{0}--{1}", edge.ArrowAtSourcePosition.X, edge.ArrowAtSourcePosition.Y);
+                graphicsObj.DrawLine(pen, (float)edgeCurve.Start.X, (float)edgeCurve.Start.Y * -1, (float)edgeCurve.Start.X * 2, (float)edgeCurve.Start.Y * -2);
+                graphicsObj.DrawLine(pen, (float)edgeCurve.End.X, (float)edgeCurve.End.Y * -1, (float)edgeCurve.End.X * 2, (float)edgeCurve.End.Y * -2);
+                graphicsObj.DrawLine(pen, (float)edge.ArrowAtTargetPosition.X, (float)edge.ArrowAtTargetPosition.Y * -1, (float)edge.ArrowAtTargetPosition.X * 2, (float)edge.ArrowAtTargetPosition.Y * -2);
+            }*/
+
+
             bitmap.Save(System.IO.Path.Combine(directory, index + ".jpg"));
-            create_json(directory, graph, index);
+
+
+            //for 1:1 aspect ratio
+            /*int image_height = (int)graph.Width > (int)graph.Height ? (int)graph.Width : (int)graph.Height;
+            Bitmap bitmap_11 = new Bitmap(image_height, image_height, PixelFormat.Format32bppPArgb);//PixelFormat.Format32bppPArgb);
+            renderer.Render(bitmap_11);
+            bitmap_11.Save(System.IO.Path.Combine(directory, "square"+index + ".jpg"));
+            create_json(directory, graph, index, true);*/
         }
 
         public static ICurve GetNodeBoundary(Microsoft.Msagl.Drawing.Node n)
         {
-            double cell = s_random.Next(50, 80);
-            double ecc = (((double)s_random.Next(20, 100) / 100.00) * cell);
+            double cell = (float)s_random.Next(50, 80);
+            double ecc = (((float)s_random.Next(20, 100) / 100.00) * cell);
+
+            /*  To increase size of rectangle use these
+             *  
+             *  double rectCell = (float)s_random.Next(8, 400);
+             *  double rectEcc = (((float)s_random.Next(10, 100) / 100.00) * rectCell);
+            */
             switch (n.Id.Split()[0])
             {
                 case "Rhombus":
-                    return CurveFactory.CreateDiamond(cell / 2.0, ecc / 2.0, new Microsoft.Msagl.Core.Geometry.Point());
+
+                    double height = ecc / 4.0 >= n.Attr.LineWidth ? ecc / 2.0 : n.Attr.LineWidth * 2;
+                    /*if (s_random.Next(0, 2) == 0)
+                    {*/
+                        if (!shapesCountDict.ContainsKey("Rhombus"))
+                        {
+                            shapesCountDict.Add("Rhombus", 1);
+                        }
+                        else
+                        {
+                            shapesCountDict["Rhombus"]++;
+                        }
+                    /*}*/
+                    /*else
+                    {
+                        n.Id = n.Id.Replace("Rhombus", "Ellipse");
+                        goto case "Ellipse";
+                    }*/
+                        
+                    return CurveFactory.CreateDiamond(cell / 2.0, height, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Circle":
+                    if (!shapesCountDict.ContainsKey("Circle"))
+                    {
+                        shapesCountDict.Add("Circle", 1);
+                    }
+                    else
+                    {
+                        shapesCountDict["Circle"]++;
+                    }
                     return CurveFactory.CreateCircle(cell / 2.0, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Ellipse":
+                    if(s_random.Next(0, 2) == 0)
+                    {
+                        n.Id = n.Id.Replace("Ellipse", "ElongatedEllipse");
+                        goto case "ElongatedEllipse";
+                    }
+                    if (!shapesCountDict.ContainsKey("Ellipse"))
+                    {
+                        shapesCountDict.Add("Ellipse", 1);
+                    }
+                    else
+                    {
+                        shapesCountDict["Ellipse"]++;
+                    }
                     return CurveFactory.CreateEllipse(cell / 2.0, ecc / 2.0, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Rectangle":
-                    return CurveFactory.CreateRectangle(cell, ecc, new Point());
+                    {
+                        if (shapesCountDict.ContainsKey("Rectangle") && shapesCountDict.ContainsKey("Parallelogram") && (shapesCountDict["Rectangle"] > shapesCountDict["Parallelogram"]))
+                        {
+                            n.Id = n.Id.Replace("Rectangle", "Parallelogram");
+                            goto case "Parallelogram";
+                        }
+                        if (!shapesCountDict.ContainsKey("Rectangle"))
+                        {
+                            shapesCountDict.Add("Rectangle", 1);
+                        }
+                        else
+                        {
+                            shapesCountDict["Rectangle"]++;
+                        }
+                        
+                        return CurveFactory.CreateRectangle(cell, ecc, new Microsoft.Msagl.Core.Geometry.Point());
+                    }
+                    
                 case "Parallelogram":
                     {
-                        ICurve baseRect = CurveFactory.CreateRectangle(cell, ecc, new Point());
+                        ICurve baseRect = CurveFactory.CreateRectangle(cell, ecc, new Microsoft.Msagl.Core.Geometry.Point());
+                        if (!shapesCountDict.ContainsKey("Parallelogram"))
+                        {
+                            shapesCountDict.Add("Parallelogram", 1);
+                        }
+                        else
+                        {
+                            shapesCountDict["Parallelogram"]++;
+                        }
+                        
                         return baseRect.Transform(new PlaneTransformation(1, (double)s_random.Next(0, 100) / 100.00, 0, 0, 1, 0));
                     }
                 case "CurvedRectangle":
+                    if (shapesCountDict.ContainsKey("CurvedRectangle") && shapesCountDict.ContainsKey("Parallelogram") && (shapesCountDict["CurvedRectangle"] > shapesCountDict["Parallelogram"]))
+                    {
+                        n.Id = n.Id.Replace("CurvedRectangle", "Parallelogram");
+                        goto case "Parallelogram";
+                    }
+                    if (!shapesCountDict.ContainsKey("CurvedRectangle"))
+                    {
+                        shapesCountDict.Add("CurvedRectangle", 1);
+                    }
+                    else
+                    {
+                        shapesCountDict["CurvedRectangle"]++;
+                    }
+                    
                     return CurveFactory.CreateRectangleWithRoundedCorners(cell * 2, ecc, ecc / 4, ecc / 4, new Microsoft.Msagl.Core.Geometry.Point());
                 case "Process":
                     {
@@ -356,10 +851,19 @@ namespace ImageGenerator
                         double x = cell;
                         double y = ecc;
                         double r = x / 2;
-                        curve.AddSegment(new Ellipse(1.5 * Math.PI, 2.5 * Math.PI, new Point(r, 0), new Point(0, y), new Point(x, 0)));
-                        curve.AddSegment(new LineSegment(curve.End, new Point(-1 * x, y)));
-                        curve.AddSegment(new Ellipse(0.5 * Math.PI, 1.5 * Math.PI, new Point(r, 0), new Point(0, y), new Point(-1 * x, 0)));
+                        curve.AddSegment(new Ellipse(1.5 * Math.PI, 2.5 * Math.PI, new Microsoft.Msagl.Core.Geometry.Point(r, 0), new Microsoft.Msagl.Core.Geometry.Point(0, y), new Microsoft.Msagl.Core.Geometry.Point(x, 0)));
+                        curve.AddSegment(new LineSegment(curve.End, new Microsoft.Msagl.Core.Geometry.Point(-1 * x, y)));
+                        curve.AddSegment(new Ellipse(0.5 * Math.PI, 1.5 * Math.PI, new Microsoft.Msagl.Core.Geometry.Point(r, 0), new Microsoft.Msagl.Core.Geometry.Point(0, y), new Microsoft.Msagl.Core.Geometry.Point(-1 * x, 0)));
                         Curve.CloseCurve(curve);
+                        if (!shapesCountDict.ContainsKey("ElongatedEllipse"))
+                        {
+                            shapesCountDict.Add("ElongatedEllipse", 1);
+                        }
+                        else
+                        {
+                            shapesCountDict["ElongatedEllipse"]++;
+                        }
+                        
                         return curve;
                     }
                 case "Database":
@@ -368,10 +872,10 @@ namespace ImageGenerator
                         double x = ecc;
                         double y = cell;
                         double r = y / 2;
-                        curve.AddSegment(new Ellipse(new Point(x, 0), new Point(0, r), new Point(0, 0)));
-                        curve.AddSegment(new Ellipse(0, Math.PI, new Point(x, 0), new Point(0, r), new Point(0, 0)));
-                        curve.AddSegment(new LineSegment(curve.End, new Point(-1 * x, -1 * y)));
-                        curve.AddSegment(new LineSegment(curve.End, new Point(x, -1 * y)));
+                        curve.AddSegment(new Ellipse(new Microsoft.Msagl.Core.Geometry.Point(x, 0), new Microsoft.Msagl.Core.Geometry.Point(0, r), new Microsoft.Msagl.Core.Geometry.Point(0, 0)));
+                        curve.AddSegment(new Ellipse(0, Math.PI, new Microsoft.Msagl.Core.Geometry.Point(x, 0), new Microsoft.Msagl.Core.Geometry.Point(0, r), new Microsoft.Msagl.Core.Geometry.Point(0, 0)));
+                        curve.AddSegment(new LineSegment(curve.End, new Microsoft.Msagl.Core.Geometry.Point(-1 * x, -1 * y)));
+                        curve.AddSegment(new LineSegment(curve.End, new Microsoft.Msagl.Core.Geometry.Point(x, -1 * y)));
                         Curve.CloseCurve(curve);
                         return curve;
                     }
@@ -379,6 +883,18 @@ namespace ImageGenerator
             throw new Exception("unrecognised shape type");
         }
 
+        public static string RandomString(int size)
+        {
+            StringBuilder builder = new StringBuilder();
+            char ch;
+            for (int i = 0; i < size; i++)
+            {
+                ch = Convert.ToChar(s_random.Next(65, 123));
+                builder.Append(ch);
+            }
+            
+            return builder.ToString();
+        }
         public static void printImage(LogicalImage image, ImageConstraints constraints)
         {
             foreach (var connection in image.Connections)
